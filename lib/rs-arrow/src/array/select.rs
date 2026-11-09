@@ -3,8 +3,8 @@ use std::{cmp, sync::Arc};
 use anyhow::{Result, anyhow, bail};
 
 use crate::{
-        Array, ArrayRef, DataType, RecordBatch, SchemaRef,
-        array::{BooleanArray, NativeType, PrimitiveArray, StringArray},
+    Array, ArrayRef, DataType, RecordBatch, SchemaRef,
+    array::{BooleanArray, NativeType, PrimitiveArray, StringArray},
     dispatch_native_type,
 };
 

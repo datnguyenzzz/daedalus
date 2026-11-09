@@ -779,6 +779,7 @@ name = "storage_engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "crc",
  "fd-lock",
  "rs-arrow",
  "thiserror",

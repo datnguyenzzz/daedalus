@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.92"
+crc = "3.4.0"
 fd-lock = "4.0.4"
 rs-arrow = {path = "../lib/rs-arrow"}
 thiserror = "2.0.21"

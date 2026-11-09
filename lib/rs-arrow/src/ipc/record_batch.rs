@@ -1,3 +1,37 @@
+/*
++----------------------------------------------------------------------------------------------------------------------+
+|                                                    IPC MESSAGE                                                       |
++-----------------------------------+---------------------------------------------------+------------------------------+
+| Prefix (8 bytes)                  | Metadata Header (8-byte aligned)                  | Body (8-byte aligned)        |
++-----------------+-----------------+---------------------------------------------------+------------------------------+
+| Continuation    | Metadata Length | FlatBuffer `FbMessage`                            | Contiguous Column Buffers    |
+| 0xFFFFFFFF      | (4 bytes, LE)   | (version, header_type, FbRecordBatch, body_length)| (Zstd-compressed or raw)     |
+| (4 bytes)       |                 | + Padding to 8-byte boundary                      |                              |
++-----------------+-----------------+---------------------------------------------------+------------------------------+
+
+METADATA HEADER (`FbRecordBatch`):
+   +-------------------------------------------------------------------------------------------------------------------+
+   | length: i32       | Row count of the RecordBatch                                                                  |
+   | compression: i8   | 0 = None, 1 = Zstd                                                                            |
+   | nodes: Vector     | Per-Field Logical Info:                                                                       |
+   |                   | | length (i64) | null_count (i64) | stats_byte (ColumnStat min/max zonemap) |                  |
+   | segments: Vector  | Per-Buffer Physical Offsets in Body:                                                          |
+   |                   | | offset (i64, rel to body start) | length (i64, bytes in body) |                             |
+   +-------------------------------------------------------------------------------------------------------------------+
+
+BODY LAYOUT (Concatenation of all column segments, aligned to 8-byte boundaries):
+   +-------------------------------------------------------------------------------------------------------------------+
+   | Field 0 (e.g. Primitive / Boolean):                                                                               |
+   |   - Segment 0 (Null Bitmap):   [uncompressed_len: i64][zstd compressed bytes][padding to 8B]                      |
+   |   - Segment 1 (Values):        [uncompressed_len: i64][zstd compressed bytes][padding to 8B]                      |
+   | Field 1 (e.g. Utf8 String):                                                                                       |
+   |   - Segment 2 (Null Bitmap):   [uncompressed_len: i64][zstd compressed bytes][padding to 8B]                      |
+   |   - Segment 3 (Offsets):       [uncompressed_len: i64][zstd compressed bytes][padding to 8B]                      |
+   |   - Segment 4 (Data bytes):    [uncompressed_len: i64][zstd compressed bytes][padding to 8B]                      |
+   | ...                                                                                                               |
+   +-------------------------------------------------------------------------------------------------------------------+
+*/
+
 use std::{
     io::{Read, Write},
     sync::Arc,
@@ -316,14 +350,29 @@ impl<R: Read> MessageReader<R> {
     }
 
     /// Reads the entire next message from the underlying reader which includes
+    /// the metadata length, the metadata
+    pub fn try_next_meta_only(&mut self) -> Result<Option<FbMessage<'_>>> {
+        let meta_len = self.read_meta_len()?;
+        let Some(meta_len) = meta_len else {
+            return Ok(None);
+        };
+
+        self.buf.clear();
+        let read = (&mut self.reader)
+            .take(meta_len as u64)
+            .read_to_end(&mut self.buf)?;
+
+        if read != meta_len {
+            return Err(anyhow!(
+                "Unexpected end of stream: expected {meta_len} metadata bytes, got {read}"
+            ));
+        }
+
+        Ok(Some(root::<FbMessage>(&self.buf.as_slice())?))
+    }
+
+    /// Reads the entire next message from the underlying reader which includes
     /// the metadata length, the metadata, and the body
-    /// # Returns
-    /// - `Ok(None)` if the the reader signals the end of stream with EOF on
-    ///   the first read
-    /// - `Err(_)` if the reader returns an error other than on the first
-    ///   read, or if the metadata length is invalid
-    /// - `Ok(Some(FbMessage, Buffer))` with the Header Message and Buffer contains the
-    ///   body bytes
     pub fn try_next(&mut self) -> Result<Option<(FbMessage<'_>, Buffer)>> {
         let meta_len = self.read_meta_len()?;
         let Some(meta_len) = meta_len else {
@@ -377,7 +426,7 @@ impl<R: Read> MessageReader<R> {
 struct RecordBatchDecoder<'a, 'b> {
     pub buf: &'a Buffer,
     pub schema: SchemaRef,
-    projection: &'b[usize],
+    projection: &'b [usize],
     segments: Vector<'a, ForwardsUOffset<FbMetaSegment<'a>>>,
     is_compressed: bool,
     row_count: i32,
@@ -388,7 +437,7 @@ impl<'a, 'b> RecordBatchDecoder<'a, 'b> {
         buf: &'a Buffer,
         fb_batch: FbRecordBatch<'a>,
         schema: SchemaRef,
-        projection: &'b[usize],
+        projection: &'b [usize],
     ) -> Self {
         let segments = fb_batch.segments().unwrap();
         let is_compressed = fb_batch.compression() != 0;
@@ -560,7 +609,7 @@ impl<'a, 'b> RecordBatchDecoder<'a, 'b> {
 pub struct Reader<'a, R: Read> {
     reader: MessageReader<R>,
     schema: SchemaRef,
-    projection: &'a[usize],
+    projection: &'a [usize],
     /// finished=true indicates we already reached to the end of a stream
     finished: bool,
 }
@@ -572,7 +621,7 @@ impl<'a, R: Read> Reader<'a, R> {
         &self.schema
     }
 
-    pub fn with_projection(mut self, projection: &'a[usize]) -> Self {
+    pub fn with_projection(mut self, projection: &'a [usize]) -> Self {
         self.projection = projection;
         self
     }
@@ -680,8 +729,7 @@ mod tests {
         }]));
 
         // 2. Build column id = [1000, 2000, 3000, 4000] (4 * i32 = 16 bytes)
-        let id_column: ArrayRef =
-            Arc::new(PrimitiveArray::from(vec![1000i32, 2000, 3000, 4000]));
+        let id_column: ArrayRef = Arc::new(PrimitiveArray::from(vec![1000i32, 2000, 3000, 4000]));
         let batch = RecordBatch::try_new(schema, vec![id_column]).unwrap();
 
         // 3. Serialize utilizing Writer into a Vec<u8> buffer (with Zstd compression enabled!)
@@ -1029,7 +1077,7 @@ mod tests {
 
         // Verify MessageReader can decode the MetaOnly message
         let mut msg_reader = MessageReader::new(&buffer[..]);
-        let (msg, _body) = msg_reader.try_next().unwrap().unwrap();
+        let msg = msg_reader.try_next_meta_only().unwrap().unwrap();
         assert_eq!(msg.header_type(), MessageType::MetaOnly as u8);
 
         let fb_batch = msg.header_as_fb_record_batch().unwrap();
@@ -1239,18 +1287,17 @@ mod tests {
 
     #[test]
     fn test_record_batch_projection_out_of_bounds() {
-        let schema = Arc::new(Schema::new(vec![
-            Field {
-                name: "id".to_string(),
-                data_type: DataType::Int32,
-                nullable: false,
-            },
-        ]));
+        let schema = Arc::new(Schema::new(vec![Field {
+            name: "id".to_string(),
+            data_type: DataType::Int32,
+            nullable: false,
+        }]));
 
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![Arc::new(PrimitiveArray::from(vec![1i32]))],
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut buffer = Vec::new();
         {

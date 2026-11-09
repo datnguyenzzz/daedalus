@@ -4,9 +4,7 @@ use std::{ptr, sync::Arc};
 
 use anyhow::Result;
 
-use crate::{
-    Array, ArrayRef, BooleanBuffer, Buffer, DataType, NullBuffer, array::PrimitiveArray,
-};
+use crate::{Array, ArrayRef, BooleanBuffer, Buffer, DataType, NullBuffer, array::PrimitiveArray};
 
 #[derive(Clone)]
 pub struct StringArray {

@@ -5,9 +5,8 @@ pub use embed::{WrappedCatalog, WrappedStorage, WrappedStorageIterator};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use rs_arrow::DataType;
+use rs_arrow::{DataType, ipc::record_batch::MessageReader};
 
-use crate::arrow::ipc::record_batch;
 pub use crate::arrow::object::ColumnStat;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +23,8 @@ pub struct ChunkMetaData {
 
 impl ChunkMetaData {
     pub fn try_new(chunk: Vec<u8>) -> Result<Self> {
-        let mut msg_reader = record_batch::MessageReader::new(&chunk[..]);
-        while let Some((msg, _buf)) = msg_reader.try_next()? {
+        let mut msg_reader = MessageReader::new(&chunk[..]);
+        while let Some(msg) = msg_reader.try_next_meta_only()? {
             if let Some(batch) = msg.header_as_fb_record_batch() {
                 let num_rows = batch.length() as usize;
                 let mut column_stats = Vec::new();
