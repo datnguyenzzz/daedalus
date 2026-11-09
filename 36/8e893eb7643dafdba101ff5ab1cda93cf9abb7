@@ -1,0 +1,26 @@
+lib/rs-arrow/src/ipc/record_batch.rs
+  h_42387b1c6b634c 1-34,352-373,429,440,612,624,732,1080,1290-1294,1299-1300
+query_engine/src/storage/mod.rs
+  h_42387b1c6b634c 8,26-27
+lib/rs-arrow/src/array/select.rs
+  h_42387b1c6b634c 6-7
+lib/rs-arrow/src/array/string_array.rs
+  h_42387b1c6b634c 7
+query_engine/Cargo.lock
+  h_42387b1c6b634c 782
+storage_engine/Cargo.lock
+  h_42387b1c6b634c 58-72,408
+storage_engine/Cargo.toml
+  h_42387b1c6b634c 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "368e893eb7643dafdba101ff5ab1cda93cf9abb7",
+  "prompts": {},
+  "humans": {
+    "h_42387b1c6b634c": {
+      "author": "datnguyenzzz <thanh.nguyen@deliveryhero.com>"
+    }
+  }
+}
