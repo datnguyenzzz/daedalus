@@ -1,0 +1,23 @@
+storage_engine/src/data/footer.rs
+  h_42387b1c6b634c 1-37,39-199,308
+  h_42387b1c6b634c 38,200-307
+lib/rs-arrow/src/object.rs
+  h_42387b1c6b634c 7,253-415
+  h_42387b1c6b634c 419-420,533-645
+lib/rs-arrow/src/array/mod.rs
+  h_42387b1c6b634c 5,17-19
+storage_engine/src/data/mod.rs
+  h_42387b1c6b634c 1-2,4-6,36-155
+  h_42387b1c6b634c 7-8,156-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "89a2bfe4146b03ab4e38b4c515ecf8fd5153140d",
+  "prompts": {},
+  "humans": {
+    "h_42387b1c6b634c": {
+      "author": "datnguyenzzz <thanh.nguyen@deliveryhero.com>"
+    }
+  }
+}
