@@ -2,7 +2,7 @@ pub mod boolean_array;
 pub mod primitive_array;
 pub mod select;
 pub mod string_array;
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 pub use boolean_array::BooleanArray;
 pub use primitive_array::PrimitiveArray;
@@ -14,6 +14,9 @@ use crate::{ArrayRef, DataType};
 pub trait NativeType: Send + Sync + Copy + 'static {
     fn data_type() -> DataType;
     fn default() -> Self;
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 macro_rules! define_native_types {

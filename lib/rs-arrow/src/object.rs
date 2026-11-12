@@ -4,6 +4,7 @@ use crate::{
     Array, DataType,
     aggregation::{self, max_str, min_str},
     array::{BooleanArray, PrimitiveArray, StringArray},
+    ord::Op,
 };
 
 pub const MAX_STAT_STRING_BYTES: usize = 32;
@@ -249,9 +250,174 @@ pub fn compute_column_stat(array: &dyn Array) -> Option<ColumnStat> {
     }
 }
 
+macro_rules! could_match_int_all {
+    ($ty:ty, $array:expr, $min:expr, $max:expr, $op:expr) => {{
+        let arr = $array
+            .as_any()
+            .downcast_ref::<PrimitiveArray<$ty>>()
+            .unwrap();
+        arr.iter().all(|opt| match opt {
+            Some(v) => {
+                let v = v as i64;
+                match $op {
+                    Op::Equal => v >= *$min && v <= *$max,
+                    Op::Less => *$min < v,
+                    Op::LessEqual => *$min <= v,
+                    Op::Greater => *$max > v,
+                    Op::GreaterEqual => *$max >= v,
+                    Op::NotEqual => true,
+                }
+            }
+            None => false,
+        })
+    }};
+}
+
+macro_rules! could_match_float_all {
+    ($ty:ty, $array:expr, $min:expr, $max:expr, $op:expr) => {{
+        let arr = $array
+            .as_any()
+            .downcast_ref::<PrimitiveArray<$ty>>()
+            .unwrap();
+        arr.iter().all(|opt| match opt {
+            Some(v) => {
+                let v = v as f64;
+                match $op {
+                    Op::Equal => v >= *$min && v <= *$max,
+                    Op::Less => *$min < v,
+                    Op::LessEqual => *$min <= v,
+                    Op::Greater => *$max > v,
+                    Op::GreaterEqual => *$max >= v,
+                    Op::NotEqual => true,
+                }
+            }
+            None => false,
+        })
+    }};
+}
+
+/// true = chunk might satisfy `col {op} value` for ALL elements in the array.
+/// false = at least one element CANNOT be satisfied, safe to prune/skip.
+pub fn could_match(stat: &ColumnStat, op: &Op, array: &dyn Array) -> bool {
+    if array.len() == 0 {
+        return true;
+    }
+
+    match stat {
+        ColumnStat::Int64 { min, max } => {
+            let matches_all = match array.data_type() {
+                DataType::Int64 => could_match_int_all!(i64, array, min, max, op),
+                DataType::Int32 => could_match_int_all!(i32, array, min, max, op),
+                DataType::Int16 => could_match_int_all!(i16, array, min, max, op),
+                DataType::Int8 => could_match_int_all!(i8, array, min, max, op),
+                _ => true, // Incompatible type: cannot prove disjoint, must read
+            };
+            matches_all
+        }
+
+        ColumnStat::Float64 { min, max } => {
+            let matches_all = match array.data_type() {
+                DataType::Float64 => could_match_float_all!(f64, array, min, max, op),
+                DataType::Float32 => could_match_float_all!(f32, array, min, max, op),
+                _ => true,
+            };
+            matches_all
+        }
+
+        ColumnStat::Utf8 { min, max } => {
+            if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
+                let matches_all = arr.iter().all(|opt| match opt {
+                    Some(v) => match op {
+                        Op::Equal => v >= min.as_str() && v <= max.as_str(),
+                        Op::Less => min.as_str() < v,
+                        Op::LessEqual => min.as_str() <= v,
+                        Op::Greater => max.as_str() > v,
+                        Op::GreaterEqual => max.as_str() >= v,
+                        Op::NotEqual => true,
+                    },
+                    None => false,
+                });
+                matches_all
+            } else {
+                true
+            }
+        }
+
+        ColumnStat::Bool {
+            has_true,
+            has_false,
+        } => {
+            if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+                let matches_all = arr.iter().all(|opt| match opt {
+                    Some(v) => match op {
+                        Op::Equal => {
+                            if v {
+                                *has_true
+                            } else {
+                                *has_false
+                            }
+                        }
+                        Op::NotEqual => {
+                            if v {
+                                *has_false
+                            } else {
+                                *has_true
+                            }
+                        }
+                        _ => true,
+                    },
+                    None => false,
+                });
+                matches_all
+            } else {
+                true
+            }
+        }
+    }
+}
+
+pub fn merge(a: &ColumnStat, b: &ColumnStat) -> ColumnStat {
+    match (a, b) {
+        (ColumnStat::Int64 { min: a0, max: a1 }, ColumnStat::Int64 { min: b0, max: b1 }) => {
+            ColumnStat::Int64 {
+                min: *a0.min(b0),
+                max: *a1.max(b1),
+            }
+        }
+        (ColumnStat::Float64 { min: a0, max: a1 }, ColumnStat::Float64 { min: b0, max: b1 }) => {
+            ColumnStat::Float64 {
+                min: a0.min(*b0),
+                max: a1.max(*b1),
+            }
+        }
+        (ColumnStat::Utf8 { min: a0, max: a1 }, ColumnStat::Utf8 { min: b0, max: b1 }) => {
+            ColumnStat::Utf8 {
+                min: a0.min(b0).clone(),
+                max: a1.max(b1).clone(),
+            }
+        }
+        (
+            ColumnStat::Bool {
+                has_true: a0,
+                has_false: a1,
+            },
+            ColumnStat::Bool {
+                has_true: b0,
+                has_false: b1,
+            },
+        ) => ColumnStat::Bool {
+            has_true: a0 | b0,
+            has_false: a1 | b1,
+        },
+        _ => a.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use crate::ArrayRef;
 
     #[test]
     fn test_column_stat_int64_roundtrip_and_disjoint() {
@@ -363,5 +529,118 @@ mod tests {
 
         assert!(true_only.is_disjoint(&false_only));
         assert!(!true_only.is_disjoint(&both));
+    }
+
+    #[test]
+    fn test_could_match_int64_all_semantics() {
+        let stat = ColumnStat::Int64 { min: 10, max: 50 };
+
+        // 1. Op::Equal: All elements within [10, 50]
+        let all_match: ArrayRef = Arc::new(PrimitiveArray::from(vec![15i64, 25, 45]));
+        assert!(could_match(&stat, &Op::Equal, all_match.as_ref()));
+
+        // 2. Op::Equal: One element outside [10, 50] -> must return false!
+        let one_fails: ArrayRef = Arc::new(PrimitiveArray::from(vec![15i64, 25, 100]));
+        assert!(!could_match(&stat, &Op::Equal, one_fails.as_ref()));
+
+        // 3. Widening from Int32
+        let int32_arr: ArrayRef = Arc::new(PrimitiveArray::from(vec![20i32, 30]));
+        assert!(could_match(&stat, &Op::Equal, int32_arr.as_ref()));
+
+        // 4. Op::Less: col < 60 (min < 60 is true)
+        let less_arr: ArrayRef = Arc::new(PrimitiveArray::from(vec![60i64]));
+        assert!(could_match(&stat, &Op::Less, less_arr.as_ref()));
+
+        // Op::Less: col < 5 (min < 5 is false)
+        let less_fails: ArrayRef = Arc::new(PrimitiveArray::from(vec![5i64]));
+        assert!(!could_match(&stat, &Op::Less, less_fails.as_ref()));
+
+        // 5. Op::Greater: col > 5 (max > 5 is true)
+        let greater_arr: ArrayRef = Arc::new(PrimitiveArray::from(vec![5i64]));
+        assert!(could_match(&stat, &Op::Greater, greater_arr.as_ref()));
+
+        // Op::Greater: col > 60 (max > 60 is false)
+        let greater_fails: ArrayRef = Arc::new(PrimitiveArray::from(vec![60i64]));
+        assert!(!could_match(&stat, &Op::Greater, greater_fails.as_ref()));
+    }
+
+    #[test]
+    fn test_could_match_float64_all_semantics() {
+        let stat = ColumnStat::Float64 { min: 0.0, max: 100.0 };
+
+        let matches: ArrayRef = Arc::new(PrimitiveArray::from(vec![25.5f64, 75.0]));
+        assert!(could_match(&stat, &Op::Equal, matches.as_ref()));
+
+        let partial_fail: ArrayRef = Arc::new(PrimitiveArray::from(vec![25.5f64, 150.0]));
+        assert!(!could_match(&stat, &Op::Equal, partial_fail.as_ref()));
+
+        // Widening from Float32
+        let f32_arr: ArrayRef = Arc::new(PrimitiveArray::from(vec![50.0f32]));
+        assert!(could_match(&stat, &Op::Equal, f32_arr.as_ref()));
+    }
+
+    #[test]
+    fn test_could_match_utf8_all_semantics() {
+        let stat = ColumnStat::Utf8 {
+            min: "banana".to_string(),
+            max: "mango".to_string(),
+        };
+
+        // All between banana and mango
+        let matches: ArrayRef = Arc::new(StringArray::from(vec!["cherry", "date"]));
+        assert!(could_match(&stat, &Op::Equal, matches.as_ref()));
+
+        // One before banana ("apple") -> false
+        let fails: ArrayRef = Arc::new(StringArray::from(vec!["cherry", "apple"]));
+        assert!(!could_match(&stat, &Op::Equal, fails.as_ref()));
+
+        // Op::Less: col < "orange" -> min ("banana") < "orange" is true
+        let less_ok: ArrayRef = Arc::new(StringArray::from(vec!["orange"]));
+        assert!(could_match(&stat, &Op::Less, less_ok.as_ref()));
+
+        // Op::Less: col < "apple" -> min ("banana") < "apple" is false
+        let less_fail: ArrayRef = Arc::new(StringArray::from(vec!["apple"]));
+        assert!(!could_match(&stat, &Op::Less, less_fail.as_ref()));
+    }
+
+    #[test]
+    fn test_could_match_bool_and_empty() {
+        let stat_true_only = ColumnStat::Bool {
+            has_true: true,
+            has_false: false,
+        };
+
+        let true_arr: ArrayRef = Arc::new(BooleanArray::from(vec![true]));
+        assert!(could_match(&stat_true_only, &Op::Equal, true_arr.as_ref()));
+
+        let false_arr: ArrayRef = Arc::new(BooleanArray::from(vec![false]));
+        assert!(!could_match(&stat_true_only, &Op::Equal, false_arr.as_ref()));
+
+        // Empty array returns true
+        let empty_arr: ArrayRef = Arc::new(PrimitiveArray::<i64>::from(Vec::<i64>::new()));
+        assert!(could_match(&stat_true_only, &Op::Equal, empty_arr.as_ref()));
+    }
+
+    #[test]
+    fn test_merge_column_stat() {
+        // Int64 merge
+        let i1 = ColumnStat::Int64 { min: 10, max: 50 };
+        let i2 = ColumnStat::Int64 { min: 5, max: 40 };
+        assert_eq!(merge(&i1, &i2), ColumnStat::Int64 { min: 5, max: 50 });
+
+        // Float64 merge
+        let f1 = ColumnStat::Float64 { min: 1.5, max: 10.0 };
+        let f2 = ColumnStat::Float64 { min: 0.5, max: 12.0 };
+        assert_eq!(merge(&f1, &f2), ColumnStat::Float64 { min: 0.5, max: 12.0 });
+
+        // Utf8 merge
+        let u1 = ColumnStat::Utf8 { min: "b".into(), max: "m".into() };
+        let u2 = ColumnStat::Utf8 { min: "a".into(), max: "k".into() };
+        assert_eq!(merge(&u1, &u2), ColumnStat::Utf8 { min: "a".into(), max: "m".into() });
+
+        // Bool merge
+        let b1 = ColumnStat::Bool { has_true: true, has_false: false };
+        let b2 = ColumnStat::Bool { has_true: false, has_false: true };
+        assert_eq!(merge(&b1, &b2), ColumnStat::Bool { has_true: true, has_false: true });
     }
 }
