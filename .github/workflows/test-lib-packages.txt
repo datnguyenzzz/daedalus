@@ -1,0 +1,94 @@
+# Moved to experimental package
+# name: Test Library Packages
+
+# on:
+#   push:
+#     branches: [ master, main ]
+#     paths:
+#       - 'lib/**'
+#   pull_request:
+#     branches: [ master, main ]
+#     paths:
+#       - 'lib/**'
+
+# env:
+#   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# jobs:
+#   test:
+#     runs-on: ubuntu-latest
+    
+#     strategy:
+#       matrix:
+#         package:
+#           - go-adaptive-radix-tree
+#           - go-block-cache
+#           - go-blocked-bloom-filter
+#           - go-bytesbufferpool
+#           - go-context-aware-lock
+#           - go-fs
+#           - go-sstable
+#           - go-wal
+#           - go-adaptive-rate-limiter
+#           - common
+
+#     steps:
+#     - uses: actions/checkout@v4
+    
+#     - name: Set up Go
+#       uses: actions/setup-go@v5
+#       with:
+#         go-version: '1.26.x'
+    
+#     - name: Test ${{ matrix.package }} with coverage
+#       run: |
+#         cd lib/${{ matrix.package }}
+#         go clean -testcache
+#         go test -v -coverprofile=coverage.out ./...
+#         go tool cover -func=coverage.out | tail -1 | awk '{print $3}' > coverage.txt
+    
+#     - name: Upload coverage artifact
+#       uses: actions/upload-artifact@v4
+#       with:
+#         name: coverage-${{ matrix.package }}
+#         path: lib/${{ matrix.package }}/coverage.txt
+
+#   report-coverage:
+#     needs: test
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - name: Download all coverage artifacts
+#       uses: actions/download-artifact@v4
+#       with:
+#         path: coverage-reports
+
+#     - name: Generate coverage report summary
+#       run: |
+#         echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+#         echo "" >> $GITHUB_STEP_SUMMARY
+#         echo "| Package | Coverage |" >> $GITHUB_STEP_SUMMARY
+#         echo "|---------|----------|" >> $GITHUB_STEP_SUMMARY
+
+#         # Sort directories to ensure consistent order in summary
+#         for dir in $(ls -d coverage-reports/coverage-* | sort); do
+#           package_name=$(basename "$dir" | sed 's/coverage-//')
+#           if [ -f "$dir/coverage.txt" ]; then
+#             coverage=$(cat "$dir/coverage.txt")
+#             # Extract numeric value from coverage percentage
+#             coverage_num=$(echo "$coverage" | sed 's/%//' | sed 's/\..*//')
+
+#             # Determine color based on coverage percentage
+#             if [ "$coverage_num" -lt 50 ]; then
+#               color_badge="![Coverage](https://img.shields.io/badge/coverage-$coverage_num-red)"
+#             elif [ "$coverage_num" -lt 75 ]; then
+#               color_badge="![Coverage](https://img.shields.io/badge/coverage-$coverage_num-yellow)"
+#             else
+#               color_badge="![Coverage](https://img.shields.io/badge/coverage-$coverage_num-green)"
+#             fi
+
+#             echo "| $package_name | $color_badge |" >> $GITHUB_STEP_SUMMARY
+#           else
+#             echo "| $package_name | ![Coverage](https://img.shields.io/badge/coverage-N%2FA-lightgrey) |" >> $GITHUB_STEP_SUMMARY
+#           fi
+#         done

@@ -1,4 +1,5 @@
 pub mod footer;
+pub mod writer;
 
 use async_trait::async_trait;
 use rs_arrow::{
@@ -44,9 +45,12 @@ pub struct ColumnPointer {
     pub segment_lengths: Vec<u32>,
 }
 
-/// extract meta -- row count, null count and [`ColumnStat`] from an IPC-encoded [`RecordBatch`]
-/// and encode it to IPC format
-pub fn extract_meta_chunk(chunk: &[u8]) -> Result<Vec<u8>, StorageError> {
+/// extract meta from an IPC-encoded [`RecordBatch`] and encode it to IPC format
+pub fn extract_meta_chunk(
+    chunk: &[u8],
+    offset: usize,
+    schema: SchemaRef,
+) -> Result<(Vec<u8>, Vec<ColumnPointer>), StorageError> {
     let mut reader = MessageReader::new(chunk);
     let fb_msg = reader
         .try_next_meta_only()
@@ -85,31 +89,6 @@ pub fn extract_meta_chunk(chunk: &[u8]) -> Result<Vec<u8>, StorageError> {
     Writer::new(&mut meta_buf)
         .write_meta_node(nodes, num_rows)
         .map_err(|e| StorageError::Arrow(e.to_string()))?;
-
-    Ok(meta_buf)
-}
-
-/// extract pointer to all columns from an IPC-encoded [`RecordBatch`]
-pub fn extract_column_pointer(
-    chunk: &[u8],
-    offset: usize,
-    schema: SchemaRef,
-) -> Result<Vec<ColumnPointer>, StorageError> {
-    let mut reader = MessageReader::new(chunk);
-    let fb_msg = reader
-        .try_next_meta_only()
-        .map_err(|e| StorageError::Arrow(e.to_string()))?
-        .ok_or_else(|| StorageError::CorruptFooter {
-            segment_id: "?".into(),
-            reason: "empty chunk".into(),
-        })?;
-    let fb_batch =
-        fb_msg
-            .header_as_fb_record_batch()
-            .ok_or_else(|| StorageError::CorruptFooter {
-                segment_id: "?".into(),
-                reason: "not a RecordBatch message".into(),
-            })?;
 
     let body_offset = offset + (chunk.len() - fb_msg.body_length() as usize);
     let fb_segments = fb_batch
@@ -154,18 +133,18 @@ pub fn extract_column_pointer(
         })
     }
 
-    Ok(pointers)
+    Ok((meta_buf, pointers))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use rs_arrow::{
         Field, RecordBatch, Schema,
         array::{PrimitiveArray, StringArray},
         ipc::record_batch::MessageType,
     };
+    use std::sync::Arc;
 
     #[test]
     fn test_extract_meta_and_column_pointers() {
@@ -193,7 +172,7 @@ mod tests {
         }
 
         // 1. Test extract_meta_chunk
-        let meta_bytes = extract_meta_chunk(&chunk).unwrap();
+        let (meta_bytes, _) = extract_meta_chunk(&chunk, 0, schema.clone()).unwrap();
         let mut reader = MessageReader::new(&meta_bytes[..]);
         let fb_msg = reader.try_next_meta_only().unwrap().unwrap();
         assert_eq!(fb_msg.header_type(), MessageType::MetaOnly as u8);
@@ -217,7 +196,7 @@ mod tests {
 
         // 2. Test extract_column_pointer
         let chunk_file_offset = 5000;
-        let pointers = extract_column_pointer(&chunk, chunk_file_offset, schema).unwrap();
+        let (_, pointers) = extract_meta_chunk(&chunk, chunk_file_offset, schema.clone()).unwrap();
         assert_eq!(pointers.len(), 2);
 
         // Column 0 should have 2 segments (nulls, values)
