@@ -1,0 +1,24 @@
+README.md
+  h_42387b1c6b634c 3,12
+x/README.md
+  h_42387b1c6b634c 1-112
+storage_engine/src/catalog/mod.rs
+  h_42387b1c6b634c 1,22-34
+storage_engine/src/data/writer.rs
+  h_42387b1c6b634c 1-44
+storage_engine/src/data/mod.rs
+  h_42387b1c6b634c 2,48-53,136,147,175,199
+.github/workflows/test-lib-packages.txt
+  h_42387b1c6b634c 1-2,4-12,14-15,17-19,21-33,35-36,38-41,43-48,50-54,56-58,60-64,66-71,73-79,81-88,90-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b94ea9cfd1053e75de8693eccd942b8fe6a1787c",
+  "prompts": {},
+  "humans": {
+    "h_42387b1c6b634c": {
+      "author": "datnguyenzzz <thanh.nguyen@deliveryhero.com>"
+    }
+  }
+}
