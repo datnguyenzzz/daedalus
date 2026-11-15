@@ -25,7 +25,14 @@ pub struct FsBackend {
 }
 
 impl FsBackend {
-    pub fn try_new(conf: Config) -> Result<Self, StorageError> {
+    pub fn try_new(conf: Option<Config>) -> Result<Self, StorageError> {
+        let conf = match conf {
+            None => Config {
+                root_dir: PathBuf::from("/tmp"),
+                fsync: false,
+            },
+            Some(v) => v,
+        };
         fs::create_dir_all(&conf.root_dir)?;
         Ok(Self {
             root_dir: conf.root_dir,
@@ -171,10 +178,10 @@ mod tests {
     async fn test_try_new_and_resolve() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path().join("data_root");
-        let backend = FsBackend::try_new(Config {
+        let backend = FsBackend::try_new(Some(Config {
             root_dir: root.clone(),
             fsync: false,
-        })
+        }))
         .unwrap();
 
         assert!(root.exists());
@@ -187,10 +194,10 @@ mod tests {
     #[tokio::test]
     async fn test_write_atomic_create_and_overwrite() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let backend = FsBackend::try_new(Config {
+        let backend = FsBackend::try_new(Some(Config {
             root_dir: temp_dir.path().to_path_buf(),
             fsync: true,
-        })
+        }))
         .unwrap();
 
         let rel_path = "tables/users/manifest-000001.bin";
@@ -226,10 +233,10 @@ mod tests {
     #[tokio::test]
     async fn test_read_range_success_and_errors() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let backend = FsBackend::try_new(Config {
+        let backend = FsBackend::try_new(Some(Config {
             root_dir: temp_dir.path().to_path_buf(),
             fsync: false,
-        })
+        }))
         .unwrap();
 
         let rel = "data/chunk.dat";
@@ -261,10 +268,10 @@ mod tests {
     #[tokio::test]
     async fn test_read_ranges_empty_and_coalesce() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let backend = FsBackend::try_new(Config {
+        let backend = FsBackend::try_new(Some(Config {
             root_dir: temp_dir.path().to_path_buf(),
             fsync: false,
-        })
+        }))
         .unwrap();
 
         let rel = "data/seg.dat";
@@ -306,10 +313,10 @@ mod tests {
     #[tokio::test]
     async fn test_with_table_lock() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let backend = FsBackend::try_new(Config {
+        let backend = FsBackend::try_new(Some(Config {
             root_dir: temp_dir.path().to_path_buf(),
             fsync: false,
-        })
+        }))
         .unwrap();
 
         let val = backend

@@ -25,7 +25,8 @@ impl Database {
                 catalog: Arc::new(storage_engine::Catalog {}),
             }),
             storage: Arc::new(WrappedStorage {
-                storage: Arc::new(storage_engine::Data {}),
+                // TODO: Finish the initiation
+                storage: Arc::new(storage_engine::Data::try_new(None).unwrap()),
             }),
         };
         Self {

@@ -22,7 +22,7 @@ impl CatalogStorage for Catalog {
 
 pub struct SegmentFileRef {
     pub dat_path: String,
-    pub footer_offset: u64,
+    pub footer_offset: usize,
     pub footer_len: u32,
     pub row_count: usize,
     pub chunk_count: usize,

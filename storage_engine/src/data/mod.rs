@@ -1,16 +1,64 @@
 pub mod footer;
 pub mod writer;
 
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
+use dashmap::DashMap;
 use rs_arrow::{
-    DataType, SchemaRef,
+    DataType, Schema, SchemaRef,
     ipc::record_batch::{MessageReader, Writer},
     object::ColumnStat,
 };
 
-use crate::{DataStorage, StorageError, StorageIterator};
+use crate::{
+    Catalog, CatalogStorage, Config, DataStorage, FsBackend, StorageError, StorageIterator,
+    data::writer::{SegmentWriter, WriteBuffer},
+};
 
-pub struct Data {}
+pub struct Data {
+    be: Arc<FsBackend>,
+    catalog: Arc<dyn CatalogStorage>,
+    schema_cache: DashMap<String, SchemaRef>,
+    write_buffers: DashMap<String, Mutex<WriteBuffer>>, // write buffer per table
+}
+
+impl Data {
+    pub fn try_new(conf: Option<Config>) -> Result<Self, StorageError> {
+        let be = Arc::new(FsBackend::try_new(conf)?);
+        let catalog = Arc::new(Catalog {});
+        Ok(Self {
+            be,
+            catalog,
+            write_buffers: DashMap::new(),
+            schema_cache: DashMap::new(),
+        })
+    }
+}
+
+impl Data {
+    async fn get_table_schema(&self, table_name: &str) -> Result<SchemaRef, StorageError> {
+        if let Some(cached) = self.schema_cache.get(table_name) {
+            return Ok(cached.clone());
+        }
+
+        let meta = self.catalog.fetch_table_meta(table_name).await?;
+        let fields: Vec<rs_arrow::Field> = meta
+            .columns
+            .into_iter()
+            .map(|(name, data_type)| rs_arrow::Field {
+                name,
+                data_type,
+                nullable: true,
+            })
+            .collect();
+        let schema = Arc::new(Schema::new(fields));
+
+        self.schema_cache
+            .insert(table_name.to_string(), schema.clone());
+        Ok(schema)
+    }
+}
 
 #[async_trait]
 impl DataStorage for Data {
@@ -22,12 +70,47 @@ impl DataStorage for Data {
         todo!()
     }
 
-    async fn flush(&self, _table_name: &str) -> Result<(), StorageError> {
-        todo!()
+    async fn flush(&self, table_name: &str) -> Result<(), StorageError> {
+        let chunks = {
+            if let Some(buffer) = self.write_buffers.get(table_name) {
+                let mut wbuf = buffer.lock().unwrap();
+                if wbuf.total_bytes == 0 {
+                    return Ok(());
+                }
+                wbuf.take()
+            } else {
+                return Ok(());
+            }
+        };
+
+        let schema = self.get_table_schema(table_name).await?;
+        let _seg_ref = SegmentWriter::seal(&self.be, table_name, chunks, schema, None).await?;
+
+        // TODO: Register the `SegmentFileRef` into the catalog later
+        Ok(())
     }
 
-    async fn append_chunk(&self, _table_name: &str, _chunk: Vec<u8>) -> Result<(), StorageError> {
-        todo!()
+    /// Appends a chunk into the table buffer and seals if policy threshold is reached
+    async fn append_chunk(&self, table_name: &str, chunk: Vec<u8>) -> Result<(), StorageError> {
+        let should_seal = {
+            let buffer = if let Some(buffer) = self.write_buffers.get(table_name) {
+                buffer
+            } else {
+                self.write_buffers
+                    .entry(table_name.to_string())
+                    .or_insert_with(|| Mutex::new(WriteBuffer::default()))
+                    .downgrade()
+            };
+            let mut wbuf = buffer.lock().unwrap();
+            wbuf.push(chunk)?;
+            wbuf.should_seal()
+        };
+
+        if should_seal {
+            self.flush(table_name).await?
+        }
+
+        Ok(())
     }
 
     async fn get_chunk_count(&self, _table_name: &str) -> Result<usize, StorageError> {
@@ -49,8 +132,8 @@ pub struct ColumnPointer {
 pub fn extract_meta_chunk(
     chunk: &[u8],
     offset: usize,
-    schema: SchemaRef,
-) -> Result<(Vec<u8>, Vec<ColumnPointer>), StorageError> {
+    schema: &Schema,
+) -> Result<(usize, Vec<u8>, Vec<ColumnPointer>), StorageError> {
     let mut reader = MessageReader::new(chunk);
     let fb_msg = reader
         .try_next_meta_only()
@@ -133,7 +216,7 @@ pub fn extract_meta_chunk(
         })
     }
 
-    Ok((meta_buf, pointers))
+    Ok((num_rows as usize, meta_buf, pointers))
 }
 
 #[cfg(test)]
@@ -172,7 +255,7 @@ mod tests {
         }
 
         // 1. Test extract_meta_chunk
-        let (meta_bytes, _) = extract_meta_chunk(&chunk, 0, schema.clone()).unwrap();
+        let (_, meta_bytes, _) = extract_meta_chunk(&chunk, 0, &schema).unwrap();
         let mut reader = MessageReader::new(&meta_bytes[..]);
         let fb_msg = reader.try_next_meta_only().unwrap().unwrap();
         assert_eq!(fb_msg.header_type(), MessageType::MetaOnly as u8);
@@ -196,7 +279,7 @@ mod tests {
 
         // 2. Test extract_column_pointer
         let chunk_file_offset = 5000;
-        let (_, pointers) = extract_meta_chunk(&chunk, chunk_file_offset, schema.clone()).unwrap();
+        let (_, _, pointers) = extract_meta_chunk(&chunk, chunk_file_offset, &schema).unwrap();
         assert_eq!(pointers.len(), 2);
 
         // Column 0 should have 2 segments (nulls, values)
