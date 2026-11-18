@@ -1,0 +1,44 @@
+storage_engine/src/catalog/manifest.rs
+  h_42387b1c6b634c 1-91
+  h_42387b1c6b634c 92-148
+lib/rs-arrow/src/object.rs
+  h_42387b1c6b634c 1,12
+  h_42387b1c6b634c 420,569-572,620-624,639-653,656-670,673-687
+storage_engine/src/data/mod.rs
+  h_42387b1c6b634c 7,16,20-22,25,31-32,90,92,124,134-135
+query_engine/src/db.rs
+  h_42387b1c6b634c 3-4,21,25,28,31
+lib/rs-arrow/src/lib.rs
+  h_42387b1c6b634c 10,16
+storage_engine/src/catalog/mod.rs
+  h_42387b1c6b634c 1-6,9-13,15-16,18,21-53,55-149,153-165,167,170-171,173-207,209-221,225-407
+  h_42387b1c6b634c 7,14,17,19-20,408
+query_engine/src/bin/cli.rs
+  h_42387b1c6b634c 42
+storage_engine/src/data/footer.rs
+  h_42387b1c6b634c 27,30
+  h_42387b1c6b634c 31-33,40,58-59,102,109
+storage_engine/Cargo.toml
+  h_42387b1c6b634c 8,13
+lib/rs-arrow/Cargo.toml
+  h_42387b1c6b634c 8,10
+lib/rs-arrow/Cargo.lock
+  h_42387b1c6b634c 11-30,139,214-225
+query_engine/Cargo.lock
+  h_42387b1c6b634c 81-100,709,829,834,934-939,957-962
+storage_engine/Cargo.lock
+  h_42387b1c6b634c 22-41,335,455,460,545-550,562-567
+storage_engine/src/data/writer.rs
+  h_42387b1c6b634c 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c72aca7321b50600926be09b4c98150978d49dd1",
+  "prompts": {},
+  "humans": {
+    "h_42387b1c6b634c": {
+      "author": "datnguyenzzz <thanh.nguyen@deliveryhero.com>"
+    }
+  }
+}
