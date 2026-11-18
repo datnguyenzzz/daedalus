@@ -4,6 +4,7 @@ pub mod writer;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use rs_arrow::{
     DataType, Schema, SchemaRef,
@@ -12,21 +13,23 @@ use rs_arrow::{
 };
 
 use crate::{
-    Catalog, CatalogStorage, Config, DataStorage, FsBackend, StorageError, StorageIterator,
+    Catalog, CatalogStorage, DataStorage, FsBackend, StorageError, StorageIterator,
     data::writer::{SegmentWriter, WriteBuffer},
 };
 
+pub const DB_MAGIC: [u8; 2] = [0x4e, 0x47];
+pub const DB_VERSION: u16 = 1;
+
 pub struct Data {
     be: Arc<FsBackend>,
-    catalog: Arc<dyn CatalogStorage>,
+    catalog: Arc<Catalog>,
     schema_cache: DashMap<String, SchemaRef>,
     write_buffers: DashMap<String, Mutex<WriteBuffer>>, // write buffer per table
 }
 
 impl Data {
-    pub fn try_new(conf: Option<Config>) -> Result<Self, StorageError> {
-        let be = Arc::new(FsBackend::try_new(conf)?);
-        let catalog = Arc::new(Catalog {});
+    pub fn try_new(be: Arc<FsBackend>) -> Result<Self, StorageError> {
+        let catalog = Arc::new(Catalog::new(be.clone()));
         Ok(Self {
             be,
             catalog,
@@ -84,9 +87,9 @@ impl DataStorage for Data {
         };
 
         let schema = self.get_table_schema(table_name).await?;
-        let _seg_ref = SegmentWriter::seal(&self.be, table_name, chunks, schema, None).await?;
+        let seg_ref = SegmentWriter::seal(&self.be, table_name, chunks, schema, None).await?;
 
-        // TODO: Register the `SegmentFileRef` into the catalog later
+        self.catalog.register_segment(table_name, seg_ref).await?;
         Ok(())
     }
 
@@ -118,7 +121,7 @@ impl DataStorage for Data {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct ColumnPointer {
     /// Absolute byte offset in the sealed segment file
     pub offset: u64,
@@ -128,7 +131,8 @@ pub struct ColumnPointer {
     pub segment_lengths: Vec<u32>,
 }
 
-/// extract meta from an IPC-encoded [`RecordBatch`] and encode it to IPC format
+/// extract meta (without decoding the meta block) from an 
+/// IPC-encoded [`RecordBatch`] and encode it to IPC format
 pub fn extract_meta_chunk(
     chunk: &[u8],
     offset: usize,

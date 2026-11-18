@@ -39,7 +39,7 @@ impl Args {
 async fn main() {
     env_logger::init();
     let args = Args::parse();
-    let db: Database = Database::new();
+    let db: Database = Database::new(None);
     let mut client = Client::new(Arc::new(db));
     let _ = args.run(&mut client).await;
 }

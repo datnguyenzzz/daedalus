@@ -7,12 +7,13 @@ pub mod ord;
 use std::{mem, ops::Deref, slice, sync::Arc};
 
 use anyhow::{Result, anyhow};
+use bincode::{Decode, Encode};
 
 use crate::array::new_empty_array;
 
 // Arrow Data type \\
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Decode, Encode)]
 pub enum DataType {
     Boolean,
     Int8,

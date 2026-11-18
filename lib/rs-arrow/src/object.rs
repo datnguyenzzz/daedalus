@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 
 use crate::{
     Array, DataType,
@@ -9,7 +9,7 @@ use crate::{
 
 pub const MAX_STAT_STRING_BYTES: usize = 32;
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Decode, Encode)]
 pub enum ColumnStat {
     Int64 { min: i64, max: i64 },
     Float64 { min: f64, max: f64 },
@@ -416,8 +416,8 @@ pub fn merge(a: &ColumnStat, b: &ColumnStat) -> ColumnStat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::ArrayRef;
+    use std::sync::Arc;
 
     #[test]
     fn test_column_stat_int64_roundtrip_and_disjoint() {
@@ -566,7 +566,10 @@ mod tests {
 
     #[test]
     fn test_could_match_float64_all_semantics() {
-        let stat = ColumnStat::Float64 { min: 0.0, max: 100.0 };
+        let stat = ColumnStat::Float64 {
+            min: 0.0,
+            max: 100.0,
+        };
 
         let matches: ArrayRef = Arc::new(PrimitiveArray::from(vec![25.5f64, 75.0]));
         assert!(could_match(&stat, &Op::Equal, matches.as_ref()));
@@ -614,7 +617,11 @@ mod tests {
         assert!(could_match(&stat_true_only, &Op::Equal, true_arr.as_ref()));
 
         let false_arr: ArrayRef = Arc::new(BooleanArray::from(vec![false]));
-        assert!(!could_match(&stat_true_only, &Op::Equal, false_arr.as_ref()));
+        assert!(!could_match(
+            &stat_true_only,
+            &Op::Equal,
+            false_arr.as_ref()
+        ));
 
         // Empty array returns true
         let empty_arr: ArrayRef = Arc::new(PrimitiveArray::<i64>::from(Vec::<i64>::new()));
@@ -629,18 +636,54 @@ mod tests {
         assert_eq!(merge(&i1, &i2), ColumnStat::Int64 { min: 5, max: 50 });
 
         // Float64 merge
-        let f1 = ColumnStat::Float64 { min: 1.5, max: 10.0 };
-        let f2 = ColumnStat::Float64 { min: 0.5, max: 12.0 };
-        assert_eq!(merge(&f1, &f2), ColumnStat::Float64 { min: 0.5, max: 12.0 });
+        let f1 = ColumnStat::Float64 {
+            min: 1.5,
+            max: 10.0,
+        };
+        let f2 = ColumnStat::Float64 {
+            min: 0.5,
+            max: 12.0,
+        };
+        assert_eq!(
+            merge(&f1, &f2),
+            ColumnStat::Float64 {
+                min: 0.5,
+                max: 12.0
+            }
+        );
 
         // Utf8 merge
-        let u1 = ColumnStat::Utf8 { min: "b".into(), max: "m".into() };
-        let u2 = ColumnStat::Utf8 { min: "a".into(), max: "k".into() };
-        assert_eq!(merge(&u1, &u2), ColumnStat::Utf8 { min: "a".into(), max: "m".into() });
+        let u1 = ColumnStat::Utf8 {
+            min: "b".into(),
+            max: "m".into(),
+        };
+        let u2 = ColumnStat::Utf8 {
+            min: "a".into(),
+            max: "k".into(),
+        };
+        assert_eq!(
+            merge(&u1, &u2),
+            ColumnStat::Utf8 {
+                min: "a".into(),
+                max: "m".into()
+            }
+        );
 
         // Bool merge
-        let b1 = ColumnStat::Bool { has_true: true, has_false: false };
-        let b2 = ColumnStat::Bool { has_true: false, has_false: true };
-        assert_eq!(merge(&b1, &b2), ColumnStat::Bool { has_true: true, has_false: true });
+        let b1 = ColumnStat::Bool {
+            has_true: true,
+            has_false: false,
+        };
+        let b2 = ColumnStat::Bool {
+            has_true: false,
+            has_false: true,
+        };
+        assert_eq!(
+            merge(&b1, &b2),
+            ColumnStat::Bool {
+                has_true: true,
+                has_false: true
+            }
+        );
     }
 }

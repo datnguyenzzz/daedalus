@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     FsBackend, StorageError,
-    catalog::SegmentFileRef,
+    catalog::manifest::SegmentFileRef,
     data::{
         extract_meta_chunk,
         footer::{FooterEntry, encode_footer},

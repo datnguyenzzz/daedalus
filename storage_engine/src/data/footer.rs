@@ -24,18 +24,20 @@ On-disk layout for a sealed segment footer
         [CRC32: 4 bytes]                = u32 little-endian checksum over [MAGIC .. end of entries]
 */
 
+use bincode::{Decode, Encode};
 use crc::{CRC_32_ISO_HDLC, Crc};
 
-use crate::{StorageError, data::ColumnPointer};
+use crate::{
+    StorageError,
+    data::{ColumnPointer, DB_MAGIC, DB_VERSION},
+};
 
-const FOOTER_MAGIC: [u8; 2] = [0x4e, 0x47];
-const FOOTER_VERSION: u16 = 1;
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 const FOOTER_FIXED_SIZE: usize = /*prefix*/ 8 + /*trailing*/4;
 const ENTRY_FIXED_SIZE: usize = 24;
 const POINTER_FIXED_SIZE: usize = 14;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct FooterEntry {
     pub offset: u64,
     pub len: u64,
@@ -53,8 +55,8 @@ pub fn encode_footer(entries: &[FooterEntry]) -> Vec<u8> {
         }
     }
     let mut buf = Vec::with_capacity(est_size);
-    buf.extend_from_slice(&FOOTER_MAGIC);
-    buf.extend_from_slice(&FOOTER_VERSION.to_le_bytes());
+    buf.extend_from_slice(&DB_MAGIC);
+    buf.extend_from_slice(&DB_VERSION.to_le_bytes());
     buf.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     for entry in entries {
         buf.extend_from_slice(&entry.offset.to_le_bytes());
@@ -97,14 +99,14 @@ pub fn decode_footer(bytes: &[u8]) -> Result<Vec<FooterEntry>, StorageError> {
         });
     }
 
-    if bytes[0..2] != FOOTER_MAGIC {
+    if bytes[0..2] != DB_MAGIC {
         return Err(StorageError::CorruptFooter {
             segment_id: "?".into(),
             reason: "invalid footer magic bytes".into(),
         });
     }
     let version = u16::from_le_bytes(bytes[2..4].try_into().unwrap());
-    if version != FOOTER_VERSION {
+    if version != DB_VERSION {
         return Err(StorageError::CorruptFooter {
             segment_id: "?".into(),
             reason: format!("unsupported footer version: {version}"),

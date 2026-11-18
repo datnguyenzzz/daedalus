@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use storage_engine::{Catalog, Config, FsBackend};
+
 use crate::{
     execution::scheduler::Scheduler,
     storage::{CatalogStorage, DataStorage, WrappedCatalog, WrappedStorage},
@@ -16,17 +18,17 @@ pub struct StorageEngine {
 }
 
 impl Database {
-    pub fn new() -> Self {
+    pub fn new(conf: Option<Config>) -> Self {
         // Default to use an embedded storage engine instead of
         // a standalone storage engine
         let scheduler = Scheduler::new();
+        let be = Arc::new(FsBackend::try_new(conf).unwrap());
         let engine = StorageEngine {
             catalog: Arc::new(WrappedCatalog {
-                catalog: Arc::new(storage_engine::Catalog {}),
+                catalog: Arc::new(Catalog::new(be.clone())),
             }),
             storage: Arc::new(WrappedStorage {
-                // TODO: Finish the initiation
-                storage: Arc::new(storage_engine::Data::try_new(None).unwrap()),
+                storage: Arc::new(storage_engine::Data::try_new(be).unwrap()),
             }),
         };
         Self {
