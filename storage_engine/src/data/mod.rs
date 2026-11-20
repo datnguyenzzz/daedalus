@@ -1,4 +1,5 @@
 pub mod footer;
+pub mod reader;
 pub mod writer;
 
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,10 @@ use rs_arrow::{
 
 use crate::{
     Catalog, CatalogStorage, DataStorage, FsBackend, StorageError, StorageIterator,
-    data::writer::{SegmentWriter, WriteBuffer},
+    data::{
+        reader::SegmentReader,
+        writer::{SegmentWriter, WriteBuffer},
+    },
 };
 
 pub const DB_MAGIC: [u8; 2] = [0x4e, 0x47];
@@ -67,10 +71,16 @@ impl Data {
 impl DataStorage for Data {
     async fn new_iterator(
         &self,
-        _table_name: &str,
-        _projection: &[usize],
+        table_name: &str,
+        projections: &[usize],
     ) -> Result<Box<dyn StorageIterator>, StorageError> {
-        todo!()
+        // pin the current manifest version
+        let manifest = self.catalog.fetch_manifest(table_name).await?;
+        Ok(Box::new(SegmentReader::new(
+            self.be.clone(),
+            manifest,
+            projections.to_vec(),
+        )))
     }
 
     async fn flush(&self, table_name: &str) -> Result<(), StorageError> {
@@ -116,8 +126,10 @@ impl DataStorage for Data {
         Ok(())
     }
 
-    async fn get_chunk_count(&self, _table_name: &str) -> Result<usize, StorageError> {
-        todo!()
+    async fn get_chunk_count(&self, table_name: &str) -> Result<usize, StorageError> {
+        let manifest = self.catalog.fetch_manifest(table_name).await?;
+        let count = manifest.segment_files.iter().map(|s| s.chunk_count).sum();
+        Ok(count)
     }
 }
 
@@ -131,7 +143,7 @@ pub struct ColumnPointer {
     pub segment_lengths: Vec<u32>,
 }
 
-/// extract meta (without decoding the meta block) from an 
+/// extract meta (without decoding the meta block) from an
 /// IPC-encoded [`RecordBatch`] and encode it to IPC format
 pub fn extract_meta_chunk(
     chunk: &[u8],

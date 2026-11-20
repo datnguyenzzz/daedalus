@@ -22,7 +22,7 @@ pub struct ChunkMetaData {
 }
 
 impl ChunkMetaData {
-    pub fn try_new(chunk: Vec<u8>) -> Result<Self> {
+    pub fn try_new(chunk: &[u8]) -> Result<Self> {
         let mut msg_reader = MessageReader::new(&chunk[..]);
         while let Some(msg) = msg_reader.try_next_meta_only()? {
             if let Some(batch) = msg.header_as_fb_record_batch() {
@@ -64,14 +64,14 @@ pub trait StorageIterator: Send + Sync {
     /// Reads ONLY the metadata (zonemap min/max) for the next storage chunk.
     /// Returns `Ok(None)` when the table scan reaches EOF.
     /// The MessageType should be [`MessageType::MetaOnly`]
-    async fn next_chunk_meta(&mut self) -> Result<Option<Vec<u8>>>;
+    async fn next_chunk_meta(&mut self) -> Result<Option<&[u8]>>;
 
     /// Skips the data block for the current chunk (zero data I/O).
     fn skip_current_chunk(&mut self) -> Result<()>;
 
     /// Reads and returns the compressed data bytes ONLY if the chunk survives pruning
     /// The MessageType should be [`MessageType::RecordBatch`]
-    async fn read_current_chunk_data(&mut self) -> Result<Vec<u8>>;
+    async fn read_current_chunk_data(&mut self) -> Result<&[u8]>;
 }
 
 /// Trait governing all Columnar Data operations (scanning, writing, appending batches).

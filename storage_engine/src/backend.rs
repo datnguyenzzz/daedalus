@@ -44,7 +44,7 @@ impl FsBackend {
         self.root_dir.join(rel)
     }
 
-    pub async fn write_atomic(&self, rel: &str, body: Vec<u8>) -> Result<(), StorageError> {
+    pub fn write_atomic_sync(&self, rel: &str, body: &[u8]) -> Result<(), StorageError> {
         let path = self.resolve(rel);
         let parent_dir = path.parent().ok_or_else(|| {
             StorageError::Io(Error::new(
@@ -57,7 +57,7 @@ impl FsBackend {
         }
         let tmp_path = parent_dir.join(format!("temp-{}", Uuid::new_v4()));
         let mut f = File::create(&tmp_path)?;
-        f.write_all(&body)?;
+        f.write_all(body)?;
         if self.fsync {
             f.sync_all()?;
         }
@@ -73,11 +73,16 @@ impl FsBackend {
         Ok(())
     }
 
-    pub async fn read_range(
+    pub async fn write_atomic(&self, rel: &str, body: Vec<u8>) -> Result<(), StorageError> {
+        self.write_atomic_sync(rel, &body)
+    }
+
+    pub async fn read_range_into(
         &self,
         rel: &str,
         range: Range<usize>,
-    ) -> Result<Vec<u8>, StorageError> {
+        buf: &mut Vec<u8>,
+    ) -> Result<(), StorageError> {
         let path = self.resolve(rel);
         let mut f = File::open(path)?;
         let file_len = f.metadata()?.len();
@@ -90,8 +95,18 @@ impl FsBackend {
         }
         f.seek(SeekFrom::Start(range.start as u64))?;
         let len = range.end - range.start;
-        let mut res = vec![0u8; len];
-        f.read_exact(&mut res)?;
+        buf.resize(len, 0);
+        f.read_exact(buf)?;
+        Ok(())
+    }
+
+    pub async fn read_range(
+        &self,
+        rel: &str,
+        range: Range<usize>,
+    ) -> Result<Vec<u8>, StorageError> {
+        let mut res = Vec::new();
+        self.read_range_into(rel, range, &mut res).await?;
         Ok(res)
     }
 

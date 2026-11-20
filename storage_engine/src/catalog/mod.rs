@@ -116,31 +116,11 @@ impl Catalog {
                 // atomic write manifest file
                 let new_manifest_rel = manifest_path(&clone_table_name, next_ver);
                 let encoded_manifest = encode_manifest(&manifest)?;
-                let curr_path = be.resolve(&current_path(&clone_table_name));
-                let final_path = be.resolve(&new_manifest_rel);
+                let current_rel = current_path(&clone_table_name);
 
-                let tmp_path = be.resolve(&format!(
-                    "{clone_table_name}/.tmp-manifest-{}",
-                    uuid::Uuid::new_v4()
-                ));
-                fs::write(&tmp_path, &encoded_manifest)?;
-                fs::rename(&tmp_path, &final_path)?;
+                be.write_atomic_sync(&new_manifest_rel, &encoded_manifest)?;
 
-                let tmp_current = be.resolve(&format!(
-                    "{clone_table_name}/.tmp-current-{}",
-                    uuid::Uuid::new_v4()
-                ));
-                fs::write(&tmp_current, manifest_file_name(next_ver))?;
-                fs::rename(&tmp_current, &curr_path)?;
-
-                #[cfg(unix)]
-                if be.fsync {
-                    if let Some(parent) = curr_path.parent() {
-                        if let Ok(dir_f) = fs::File::open(parent) {
-                            let _ = dir_f.sync_all();
-                        }
-                    }
-                }
+                be.write_atomic_sync(&current_rel, manifest_file_name(next_ver).as_bytes())?;
 
                 Ok(next_ver)
             })
@@ -182,26 +162,10 @@ impl CatalogStorage for Catalog {
                 let manifest_rel = manifest_path(&clone_table_name, manifest.version);
                 let encoded = encode_manifest(&manifest)?;
 
-                let parent_dir = be.resolve(&clone_table_name);
-                fs::create_dir_all(&parent_dir)?;
-
-                let tmp_path = parent_dir.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
-                fs::write(&tmp_path, &encoded)?;
-                fs::rename(&tmp_path, be.resolve(&manifest_rel))?;
+                be.write_atomic_sync(&manifest_rel, &encoded)?;
 
                 let current_rel = current_path(&clone_table_name);
-                let tmp_current = parent_dir.join(format!(".tmp-current-{}", uuid::Uuid::new_v4()));
-                fs::write(&tmp_current, manifest_file_name(manifest.version))?;
-                fs::rename(&tmp_current, be.resolve(&current_rel))?;
-
-                #[cfg(unix)]
-                if be.fsync {
-                    if let Some(parent) = be.resolve(&current_path(&clone_table_name)).parent() {
-                        if let Ok(dir_f) = fs::File::open(parent) {
-                            let _ = dir_f.sync_all();
-                        }
-                    }
-                }
+                be.write_atomic_sync(&current_rel, manifest_file_name(manifest.version).as_bytes())?;
                 Ok(())
             })
             .await

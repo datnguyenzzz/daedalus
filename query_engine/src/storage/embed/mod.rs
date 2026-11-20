@@ -15,7 +15,7 @@ pub struct WrappedStorageIterator {
 
 #[async_trait]
 impl StorageIterator for WrappedStorageIterator {
-    async fn next_chunk_meta(&mut self) -> Result<Option<Vec<u8>>> {
+    async fn next_chunk_meta(&mut self) -> Result<Option<&[u8]>> {
         let res = self.inner.next_chunk_meta().await?;
         return Ok(res);
     }
@@ -25,7 +25,7 @@ impl StorageIterator for WrappedStorageIterator {
         return Ok(res);
     }
 
-    async fn read_current_chunk_data(&mut self) -> Result<Vec<u8>> {
+    async fn read_current_chunk_data(&mut self) -> Result<&[u8]> {
         let res = self.inner.read_current_chunk_data().await?;
         return Ok(res);
     }
@@ -126,6 +126,8 @@ pub(crate) mod tests {
 
     use crate::storage::{CatalogStorage, DataStorage, StorageIterator, TableMetadata};
 
+    const MOCK_DATA: &[u8] = &[1, 2, 3];
+
     pub struct MockStorageIterator {
         pub chunks: Vec<Vec<u8>>,
         pub current_idx: usize,
@@ -133,9 +135,9 @@ pub(crate) mod tests {
 
     #[async_trait]
     impl StorageIterator for MockStorageIterator {
-        async fn next_chunk_meta(&mut self) -> Result<Option<Vec<u8>>> {
+        async fn next_chunk_meta(&mut self) -> Result<Option<&[u8]>> {
             if self.current_idx < self.chunks.len() {
-                Ok(Some(self.chunks[self.current_idx].clone()))
+                Ok(Some(&self.chunks[self.current_idx]))
             } else {
                 Ok(None)
             }
@@ -148,9 +150,9 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        async fn read_current_chunk_data(&mut self) -> Result<Vec<u8>> {
+        async fn read_current_chunk_data(&mut self) -> Result<&[u8]> {
             if self.current_idx < self.chunks.len() {
-                let data = self.chunks[self.current_idx].clone();
+                let data = &self.chunks[self.current_idx];
                 self.current_idx += 1;
                 Ok(data)
             } else {
@@ -269,11 +271,9 @@ pub(crate) mod tests {
 
     #[async_trait]
     impl storage_engine::StorageIterator for MockEmbeddedStorageIterator {
-        async fn next_chunk_meta(
-            &mut self,
-        ) -> Result<Option<Vec<u8>>, storage_engine::StorageError> {
+        async fn next_chunk_meta(&mut self) -> Result<Option<&[u8]>, storage_engine::StorageError> {
             if self.cursor < self.chunks.len() {
-                Ok(Some(vec![1, 2, 3]))
+                Ok(Some(MOCK_DATA))
             } else {
                 Ok(None)
             }
@@ -284,10 +284,8 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        async fn read_current_chunk_data(
-            &mut self,
-        ) -> Result<Vec<u8>, storage_engine::StorageError> {
-            let data = self.chunks[self.cursor].clone();
+        async fn read_current_chunk_data(&mut self) -> Result<&[u8], storage_engine::StorageError> {
+            let data = &self.chunks[self.cursor];
             self.cursor += 1;
             Ok(data)
         }
@@ -377,7 +375,7 @@ pub(crate) mod tests {
 
         let mut it = wrapped_storage.new_iterator("test", &[0, 0]).await.unwrap();
         let meta = it.next_chunk_meta().await.unwrap();
-        assert_eq!(meta, Some(vec![1, 2, 3]));
+        assert_eq!(meta, Some(vec![1, 2, 3]).as_deref());
         let data = it.read_current_chunk_data().await.unwrap();
         assert_eq!(data, vec![10, 20]);
         assert_eq!(it.next_chunk_meta().await.unwrap(), None);
